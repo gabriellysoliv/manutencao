@@ -66,12 +66,12 @@ export default function navegation() {
         </TouchableOpacity>
 
         {/* Botão Setores */}
-        <TouchableOpacity
+          <TouchableOpacity
           style={[styles.botao, { backgroundColor: '#f26a21' }]}
-          onPress={() => rota.push('/setores')}
+          onPress={() => rota.push('/demandaUrgente')}
         >
           <AntDesign name="folderopen" size={20} color="#fff" />
-          <Text style={styles.textoBotao}>Setores</Text>
+          <Text style={styles.textoBotao}>Demandas Urgentes</Text>
         </TouchableOpacity>
 
         {/* Botão Mensagens */}
