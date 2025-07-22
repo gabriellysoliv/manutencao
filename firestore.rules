@@ -1,0 +1,71 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Função que retorna o documento do usuário logado
+    function getUser() {
+      return exists(/databases/$(database)/documents/usuarios/$(request.auth.uid))
+        ? get(/databases/$(database)/documents/usuarios/$(request.auth.uid)).data
+        : null;
+    }
+
+    // Regras para demandas
+    match /demandas/{docId} {
+      // Permitir leitura
+      allow read: if request.auth != null && getUser() != null && (
+        getUser().tipo == 'admin' || 
+        resource.data.responsavelSolicitacao == getUser().email ||
+        resource.data.responsavelVisita == getUser().email ||
+        resource.data.status == "Início"
+      );
+
+      // Permitir criação de demandas por admin ou líder
+      allow create: if request.auth != null && getUser() != null &&
+        (getUser().tipo == 'admin' || getUser().tipo == 'lider');
+
+      // Apenas admin pode deletar demandas
+      allow delete: if request.auth != null && getUser() != null &&
+        getUser().tipo == 'admin';
+
+      // Permitir atualização de demandas com lógica de permissões
+      allow update: if request.auth != null && getUser() != null && (
+        // Admin pode editar tudo
+        getUser().tipo == 'admin' ||
+
+        // Líder pode editar tudo se for responsável
+        (
+          getUser().tipo == 'lider' &&
+          (
+            resource.data.responsavelSolicitacao == getUser().email ||
+            resource.data.responsavelVisita == getUser().email
+          )
+        ) ||
+
+        // Funcionário pode alterar apenas o status se for responsável
+        (
+          getUser().tipo == 'funcionario' &&
+          (
+            resource.data.responsavelSolicitacao == getUser().email ||
+            resource.data.responsavelVisita == getUser().email
+          ) &&
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status'])
+        )
+      );
+    }
+
+    // Regras para usuários
+    match /usuarios/{userId} {
+      // Qualquer usuário logado pode ler os dados de usuários (p. ex. para pegar tipo)
+      allow read: if request.auth != null;
+
+      // Admin pode escrever em qualquer usuário, ou o próprio usuário pode atualizar seus dados
+      allow write: if request.auth != null && (
+        request.auth.uid == userId ||
+        (getUser() != null && getUser().tipo == 'admin')
+      );
+    }
+  }
+}
+
+
+
