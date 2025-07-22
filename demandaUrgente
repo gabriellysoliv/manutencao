@@ -1,0 +1,287 @@
+import React, { useEffect, useState } from 'react';
+import {
+  View, Text, StyleSheet, TextInput, TouchableOpacity,
+  ScrollView, Alert, ActivityIndicator, Image,
+} from 'react-native';
+import {
+  collection, getDocs, addDoc, serverTimestamp,
+} from 'firebase/firestore';
+import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
+import { db, storage } from '../app/firebaseConfig';
+import { useRouter } from 'expo-router';
+import { AntDesign } from '@expo/vector-icons';
+import * as ImagePicker from 'expo-image-picker';
+
+interface UsuarioEquipe {
+  id: string;
+  email: string;
+  nome: string;
+}
+
+interface FormularioUrgencia {
+  data: string;
+  hora: string;
+  local: string;
+  descricao: string;
+  gravidade: string;
+}
+
+export default function UrgenciaForm() {
+  const router = useRouter();
+
+  const [usuariosLideres, setUsuariosLideres] = useState<UsuarioEquipe[]>([]);
+  const [selecionados, setSelecionados] = useState<string[]>([]);
+  const [form, setForm] = useState<FormularioUrgencia>({
+    data: '',
+    hora: '',
+    local: '',
+    descricao: '',
+    gravidade: '',
+  });
+  const [imagem, setImagem] = useState<string | null>(null);
+  const [imagemBlob, setImagemBlob] = useState<Blob | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    const buscarLideres = async () => {
+      try {
+        const snapshot = await getDocs(collection(db, 'usuarios'));
+        const dados = snapshot.docs
+          .map(doc => ({ id: doc.id, ...doc.data() }))
+          .filter((u: any) => u.tipo === 'lider')
+          .map((u: any) => ({
+            id: u.id,
+            email: u.email,
+            nome: u.nome || u.email,
+          }));
+        setUsuariosLideres(dados);
+      } catch (error) {
+        console.error('Erro ao buscar líderes:', error);
+        Alert.alert('Erro', 'Não foi possível carregar os líderes.');
+      }
+    };
+
+    buscarLideres();
+  }, []);
+
+  const handleChange = (key: keyof FormularioUrgencia, value: string) => {
+    setForm({ ...form, [key]: value });
+  };
+
+  const handleSelecionar = (email: string) => {
+    setSelecionados(prev =>
+      prev.includes(email) ? prev.filter(e => e !== email) : [...prev, email]
+    );
+  };
+
+  const selecionarImagem = async () => {
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      quality: 0.5,
+      allowsEditing: true,
+    });
+
+    if (!result.canceled) {
+      const uri = result.assets[0].uri;
+      setImagem(uri);
+      const blob = await (await fetch(uri)).blob();
+      setImagemBlob(blob);
+    }
+  };
+
+  const enviarUrgencia = async () => {
+    if (!form.data || !form.local || !form.descricao) {
+      Alert.alert('Erro', 'Preencha todos os campos obrigatórios.');
+      return;
+    }
+    if (selecionados.length === 0) {
+      Alert.alert('Erro', 'Selecione ao menos um líder.');
+      return;
+    }
+
+    setLoading(true);
+    let arquivoURL = null;
+
+    try {
+      if (imagemBlob) {
+        const refPath = `urgencias/${Date.now()}.jpg`;
+        const imagemRef = ref(storage, refPath);
+        await uploadBytes(imagemRef, imagemBlob);
+        arquivoURL = await getDownloadURL(imagemRef);
+      }
+
+      await addDoc(collection(db, 'demandas'), {
+        ...form,
+        responsavelVisita: selecionados,
+        responsavelSolicitacao: '',
+        status: 'Início',
+        createdAt: serverTimestamp(),
+        arquivo: arquivoURL || null,
+        liderEmail: selecionados[0],
+      });
+
+      Alert.alert('Sucesso', 'Urgência registrada com sucesso!');
+      router.replace('/tarefas');
+    } catch (error) {
+      console.error(error);
+      Alert.alert('Erro', 'Não foi possível enviar a urgência.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <View style={styles.container}>
+      <View style={styles.header}>
+        <TouchableOpacity onPress={() => router.push('/navegation')}>
+          <AntDesign name="arrowleft" size={24} color="#fff" />
+        </TouchableOpacity>
+        <Text style={styles.headerText}>FORMULÁRIO DE URGÊNCIA</Text>
+      </View>
+
+      <ScrollView contentContainerStyle={styles.form}>
+        <Text>Data:</Text>
+        <TextInput
+          style={styles.input}
+          placeholder="Ex: 22/07/2025"
+          value={form.data}
+          onChangeText={t => handleChange('data', t)}
+        />
+
+        <Text>Hora:</Text>
+        <TextInput
+          style={styles.input}
+          placeholder="Ex: 14:30"
+          value={form.hora}
+          onChangeText={t => handleChange('hora', t)}
+        />
+
+        <Text>Local:</Text>
+        <TextInput
+          style={styles.input}
+          placeholder="Digite o local do ocorrido"
+          value={form.local}
+          onChangeText={t => handleChange('local', t)}
+        />
+
+        <Text>Gravidade:</Text>
+        <TextInput
+          style={styles.input}
+          placeholder="Ex: Alta, Média, Baixa"
+          value={form.gravidade}
+          onChangeText={t => handleChange('gravidade', t)}
+        />
+
+        <Text>Descrição do problema:</Text>
+        <TextInput
+          style={styles.inputMultiline}
+          multiline
+          value={form.descricao}
+          placeholder="Explique a situação com detalhes"
+          onChangeText={t => handleChange('descricao', t)}
+        />
+
+        <Text style={styles.subHeader}>Selecione os líderes responsáveis:</Text>
+        {usuariosLideres.map(l => (
+          <TouchableOpacity key={l.id} style={styles.checkboxContainer} onPress={() => handleSelecionar(l.email)}>
+            <View style={[styles.checkbox, selecionados.includes(l.email) && styles.checked]}>
+              {selecionados.includes(l.email) && <Text style={styles.checkMark}>✓</Text>}
+            </View>
+            <Text>{l.nome}</Text>
+          </TouchableOpacity>
+        ))}
+
+        <TouchableOpacity onPress={selecionarImagem}>
+          <Text style={styles.imagePickerText}>
+            {imagem ? 'Trocar Imagem' : 'Selecionar Imagem (opcional)'}
+          </Text>
+        </TouchableOpacity>
+
+        {imagem && <Image source={{ uri: imagem }} style={{ width: '100%', height: 180, marginTop: 10 }} />}
+
+        <TouchableOpacity style={styles.submitButton} onPress={enviarUrgencia} disabled={loading}>
+          {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.submitButtonText}>ENVIAR URGÊNCIA</Text>}
+        </TouchableOpacity>
+      </ScrollView>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: { flex: 1, backgroundColor: '#fff' },
+  header: {
+    backgroundColor: '#B00020',
+    height: 55,
+    paddingHorizontal: 15,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  headerText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: 'bold',
+    marginLeft: 10,
+  },
+  form: { padding: 20 },
+  input: {
+    borderWidth: 1,
+    borderColor: '#FFD700',
+    padding: 10,
+    borderRadius: 8,
+    marginBottom: 15,
+  },
+  inputMultiline: {
+    borderWidth: 1,
+    borderColor: '#FFD700',
+    borderRadius: 8,
+    padding: 10,
+    height: 100,
+    textAlignVertical: 'top',
+    marginBottom: 15,
+  },
+  subHeader: {
+    fontWeight: 'bold',
+    marginVertical: 10,
+    color: '#B00020',
+  },
+  checkboxContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  checkbox: {
+    width: 24,
+    height: 24,
+    borderWidth: 2,
+    borderColor: '#B00020',
+    marginRight: 10,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  checked: {
+    backgroundColor: '#B00020',
+  },
+  checkMark: {
+    color: '#fff',
+    fontWeight: 'bold',
+  },
+  imagePickerText: {
+    color: '#B00020',
+    fontWeight: '600',
+    textAlign: 'center',
+    marginBottom: 10,
+  },
+  submitButton: {
+    backgroundColor: '#B00020',
+    padding: 15,
+    borderRadius: 10,
+    alignItems: 'center',
+    marginTop: 20,
+  },
+  submitButtonText: {
+    color: '#fff',
+    fontWeight: 'bold',
+    fontSize: 16,
+  },
+});
